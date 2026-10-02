@@ -22,59 +22,7 @@ st.set_page_config(
 # =========================================================
 
 st.markdown("""
-/* ===== FORM VISIBILITY FIX ===== */
 
-/* Text typed into normal input boxes */
-.stTextInput input {
-color: #111111 !important;
-background-color: #ffffff !important;
--webkit-text-fill-color: #111111 !important;
-}
-
-/* Description / text area */
-.stTextArea textarea {
-color: #111111 !important;
-background-color: #ffffff !important;
--webkit-text-fill-color: #111111 !important;
-caret-color: #ff7a00 !important;
-}
-
-/* Placeholder text */
-.stTextInput input::placeholder,
-.stTextArea textarea::placeholder {
-color: #666666 !important;
--webkit-text-fill-color: #666666 !important;
-opacity: 1 !important;
-}
-
-/* Form field labels */
-.stTextInput label,
-.stTextArea label,
-.stSelectbox label {
-color: #ffffff !important;
-font-weight: 700 !important;
-}
-
-/* Dropdown boxes */
-div[data-baseweb="select"] > div {
-background-color: #ffffff !important;
-color: #111111 !important;
-}
-
-/* Dropdown selected text */
-div[data-baseweb="select"] span {
-color: #111111 !important;
-}
-
-/* Make informational/detail boxes readable */
-div[data-testid="stAlert"] {
-color: #ffffff !important;
-}
-
-div[data-testid="stAlert"] p {
-color: #ffffff !important;
-font-weight: 600 !important;
-}
 <style>
 
 .stApp {
