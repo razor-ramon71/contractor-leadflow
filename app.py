@@ -22,7 +22,10 @@ st.set_page_config(
 # =========================================================
 
 st.markdown("""
-
+.stTextArea textarea {
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+}
 <style>
 
 .stApp {
