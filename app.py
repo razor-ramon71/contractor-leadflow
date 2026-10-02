@@ -22,6 +22,15 @@ st.set_page_config(
 # =========================================================
 
 st.markdown("""
+textarea {
+    color: #ffffff !important;
+    background-color: #111f2c !important;
+    caret-color: #ff7a00 !important;
+    }
+textarea::placeholder {
+    color:#7f91a3 !important;
+    opacity: 1 !important;
+    }
 <style>
 
 .stApp {
