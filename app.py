@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
+import boto3
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from botocore.exceptions import ClientError
 
 # =========================================================
 # LEAD RESCUE AI
@@ -15,13 +18,12 @@ st.set_page_config(
 )
 
 # =========================================================
-# THEME
+# DARK / ORANGE THEME
 # =========================================================
 
 st.markdown("""
 <style>
 
-/* MAIN APP */
 .stApp {
     background:
         radial-gradient(circle at 85% 10%, rgba(255,115,0,.08), transparent 25%),
@@ -29,7 +31,6 @@ st.markdown("""
     color: #f5f7fa;
 }
 
-/* SIDEBAR */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #08121d 0%, #0b1723 100%);
     border-right: 1px solid #1d2b38;
@@ -39,39 +40,38 @@ section[data-testid="stSidebar"] * {
     color: #e8edf2;
 }
 
-/* HEADINGS */
 h1, h2, h3 {
     color: #ffffff !important;
     font-weight: 800 !important;
 }
 
-/* ORANGE ACCENT */
 .orange {
     color: #ff7a00;
 }
 
 .brand {
-    font-size: 32px;
+    font-size: 30px;
     font-weight: 900;
     letter-spacing: -1px;
-    margin-bottom: 0px;
 }
 
 .tagline {
     color: #8899aa;
     letter-spacing: 4px;
     font-size: 11px;
-    margin-top: -5px;
+    margin-top: -4px;
     margin-bottom: 25px;
 }
 
-/* HERO */
 .hero {
     padding: 32px;
     border-radius: 20px;
     border: 1px solid #203040;
-    background:
-        linear-gradient(145deg, rgba(17,32,47,.96), rgba(9,20,31,.96));
+    background: linear-gradient(
+        145deg,
+        rgba(17,32,47,.96),
+        rgba(9,20,31,.96)
+    );
     box-shadow: 0 18px 45px rgba(0,0,0,.25);
     margin-bottom: 22px;
 }
@@ -98,7 +98,6 @@ h1, h2, h3 {
     max-width: 700px;
 }
 
-/* METRIC CARDS */
 div[data-testid="stMetric"] {
     background: linear-gradient(145deg, #101e2b, #0a1621);
     border: 1px solid #203142;
@@ -115,7 +114,6 @@ div[data-testid="stMetricValue"] {
     color: #ffffff;
 }
 
-/* FORMS */
 div[data-testid="stForm"] {
     background: rgba(13,27,40,.88);
     border: 1px solid #213344;
@@ -123,15 +121,6 @@ div[data-testid="stForm"] {
     padding: 25px;
 }
 
-div[data-baseweb="input"] > div,
-div[data-baseweb="select"] > div,
-textarea {
-    background-color: #101f2c !important;
-    border-color: #2a3d4f !important;
-    color: white !important;
-}
-
-/* BUTTONS */
 .stButton > button,
 .stFormSubmitButton > button {
     background: linear-gradient(90deg, #ff6a00, #ff9418);
@@ -140,81 +129,112 @@ textarea {
     border-radius: 10px;
     font-weight: 900;
     min-height: 48px;
-    box-shadow: 0 7px 18px rgba(255,122,0,.20);
 }
 
-.stButton > button:hover,
-.stFormSubmitButton > button:hover {
-    color: #07111c;
-    border: none;
-    transform: translateY(-1px);
+.lead-card {
+    padding: 24px;
+    border-radius: 18px;
+    border: 1px solid #243748;
+    background: linear-gradient(145deg, #101e2b, #0a1621);
+    margin-top: 12px;
+    margin-bottom: 18px;
 }
 
-/* DATAFRAME */
-div[data-testid="stDataFrame"] {
-    border: 1px solid #203142;
-    border-radius: 14px;
-    overflow: hidden;
+.detail-label {
+    color: #7f91a3;
+    font-size: 12px;
+    letter-spacing: 1px;
+    font-weight: 700;
 }
 
-/* DIVIDERS */
+.detail-value {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
 hr {
     border-color: #203040 !important;
-}
-
-/* CAPTIONS */
-.stCaption {
-    color: #718294 !important;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# STORAGE - TEMPORARY SESSION STORAGE
-# Database comes next.
+# AWS DYNAMODB CONNECTION
 # =========================================================
 
-if "leads" not in st.session_state:
-    st.session_state.leads = []
+@st.cache_resource
+def get_table():
+
+    dynamodb = boto3.resource(
+        "dynamodb",
+        region_name=st.secrets["AWS_REGION"],
+        aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"]
+    )
+
+    return dynamodb.Table(
+        st.secrets["DYNAMODB_TABLE"]
+    )
+
+try:
+    table = get_table()
+    database_ready = True
+
+except Exception:
+    table = None
+    database_ready = False
 
 # =========================================================
 # CENTRAL TIME
 # =========================================================
 
-def central_time():
+def central_now():
+
     return datetime.now(
         ZoneInfo("America/Chicago")
-    ).strftime("%m/%d/%Y %I:%M %p")
+    )
+
+def display_time():
+
+    return central_now().strftime(
+        "%m/%d/%Y %I:%M %p"
+    )
 
 # =========================================================
 # LEAD SCORING
 # =========================================================
 
 def score_lead(urgency, budget, service):
+
     score = 0
 
-    # Urgency
     if urgency == "Emergency / ASAP":
         score += 45
+
     elif urgency == "Today":
         score += 35
+
     elif urgency == "This Week":
         score += 20
+
     else:
         score += 5
 
-    # Budget
     if budget == "$5,000+":
         score += 35
+
     elif budget == "$2,000 - $5,000":
         score += 28
+
     elif budget == "$500 - $2,000":
         score += 20
+
     else:
         score += 8
 
-    # Higher-value / urgent service types
     major_services = [
         "Electrical Panel / Breaker",
         "No Power / Electrical Problem",
@@ -228,20 +248,93 @@ def score_lead(urgency, budget, service):
     else:
         score += 8
 
-    # Keep score at 100 max
     score = min(score, 100)
 
     if score >= 70:
         rating = "🔥 HOT"
+
     elif score >= 40:
         rating = "🟡 WARM"
+
     else:
         rating = "🔵 COLD"
 
     return rating, score
 
 # =========================================================
-# SIDEBAR BRAND
+# DATABASE FUNCTIONS
+# =========================================================
+
+def save_lead(lead):
+
+    try:
+        table.put_item(Item=lead)
+        return True
+
+    except ClientError:
+        return False
+
+
+def load_leads():
+
+    if not database_ready:
+        return []
+
+    try:
+        response = table.scan()
+        items = response.get("Items", [])
+
+        # DynamoDB Scan can be paginated.
+        while "LastEvaluatedKey" in response:
+
+            response = table.scan(
+                ExclusiveStartKey=response[
+                    "LastEvaluatedKey"
+                ]
+            )
+
+            items.extend(
+                response.get("Items", [])
+            )
+
+        items.sort(
+            key=lambda x: x.get(
+                "created_at",
+                ""
+            ),
+            reverse=True
+        )
+
+        return items
+
+    except ClientError:
+        return []
+
+
+def update_lead_status(lead_id, status):
+
+    try:
+
+        table.update_item(
+            Key={
+                "lead_id": lead_id
+            },
+            UpdateExpression="SET #s = :status",
+            ExpressionAttributeNames={
+                "#s": "status"
+            },
+            ExpressionAttributeValues={
+                ":status": status
+            }
+        )
+
+        return True
+
+    except ClientError:
+        return False
+
+# =========================================================
+# SIDEBAR
 # =========================================================
 
 st.sidebar.markdown("""
@@ -254,7 +347,7 @@ CAPTURE • QUALIFY • CLOSE
 </div>
 """, unsafe_allow_html=True)
 
-mode = st.sidebar.radio(
+page = st.sidebar.radio(
     "NAVIGATION",
     [
         "🏠 Dashboard",
@@ -267,21 +360,36 @@ mode = st.sidebar.radio(
 
 st.sidebar.divider()
 
-st.sidebar.markdown("""
-**Never lose another lead.**
+if database_ready:
 
-Capture customers while you're working and know who needs your attention first.
-""")
+    st.sidebar.success(
+        "● AWS DATABASE CONNECTED"
+    )
+
+else:
+
+    st.sidebar.error(
+        "● DATABASE CONNECTION ERROR"
+    )
+
+# =========================================================
+# LOAD DATABASE LEADS
+# =========================================================
+
+leads = load_leads()
 
 # =========================================================
 # DASHBOARD
 # =========================================================
 
-if mode == "🏠 Dashboard":
+if page == "🏠 Dashboard":
 
     st.markdown("""
     <div class="hero">
-        <div class="hero-label">LEAD RESCUE AI</div>
+
+        <div class="hero-label">
+            LEAD RESCUE AI
+        </div>
 
         <div class="hero-title">
             Never Lose Another<br>
@@ -289,49 +397,62 @@ if mode == "🏠 Dashboard":
         </div>
 
         <div class="hero-text">
-            Customers request service from your link or QR code.
-            Lead Rescue AI captures, qualifies and organizes the
-            opportunity while you're working.
+            Capture customers while you're working.
+            Lead Rescue AI qualifies every opportunity
+            and shows you which leads need attention first.
         </div>
+
     </div>
     """, unsafe_allow_html=True)
-
-    leads = st.session_state.leads
 
     total_leads = len(leads)
 
     hot_leads = sum(
-        1 for lead in leads
-        if lead["Rating"] == "🔥 HOT"
+        1 for x in leads
+        if x.get("rating") == "🔥 HOT"
     )
 
     new_leads = sum(
-        1 for lead in leads
-        if lead["Status"] == "New"
+        1 for x in leads
+        if x.get("status") == "New"
     )
 
     potential_value = 0
 
     for lead in leads:
 
-        if lead["Budget"] == "$5,000+":
+        budget = lead.get("budget", "")
+
+        if budget == "$5,000+":
             potential_value += 5000
 
-        elif lead["Budget"] == "$2,000 - $5,000":
+        elif budget == "$2,000 - $5,000":
             potential_value += 3500
 
-        elif lead["Budget"] == "$500 - $2,000":
+        elif budget == "$500 - $2,000":
             potential_value += 1250
 
-        else:
+        elif budget:
             potential_value += 250
 
-    col1, col2, col3, col4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
 
-    col1.metric("TOTAL LEADS", total_leads)
-    col2.metric("🔥 HOT LEADS", hot_leads)
-    col3.metric("🆕 NEW LEADS", new_leads)
-    col4.metric(
+    c1.metric(
+        "TOTAL LEADS",
+        total_leads
+    )
+
+    c2.metric(
+        "🔥 HOT LEADS",
+        hot_leads
+    )
+
+    c3.metric(
+        "🆕 NEW LEADS",
+        new_leads
+    )
+
+    c4.metric(
         "💰 POTENTIAL REVENUE",
         f"${potential_value:,.0f}"
     )
@@ -343,82 +464,87 @@ if mode == "🏠 Dashboard":
     if not leads:
 
         st.info(
-            "No leads yet. Open Request Service and submit a test lead."
+            "No permanent leads yet. "
+            "Submit a new Request Service."
         )
 
     else:
 
-        df = pd.DataFrame(leads)
+        dashboard_rows = []
+
+        for lead in leads:
+
+            dashboard_rows.append({
+                "Score": lead.get("score", 0),
+                "Rating": lead.get("rating", ""),
+                "Customer": lead.get("customer", ""),
+                "Phone": lead.get("phone", ""),
+                "Service": lead.get("service", ""),
+                "Urgency": lead.get("urgency", ""),
+                "Budget": lead.get("budget", ""),
+                "Source": lead.get("source", ""),
+                "Status": lead.get("status", ""),
+                "Date": lead.get("display_date", "")
+            })
 
         st.dataframe(
-            df[
-                [
-                    "Score",
-                    "Rating",
-                    "Customer",
-                    "Phone",
-                    "Service",
-                    "Urgency",
-                    "Budget",
-                    "Source",
-                    "Status",
-                    "Date"
-                ]
-            ],
+            pd.DataFrame(dashboard_rows),
             use_container_width=True,
             hide_index=True
         )
 
 # =========================================================
-# CUSTOMER REQUEST SERVICE
+# REQUEST SERVICE
 # =========================================================
 
-elif mode == "➕ Request Service":
+elif page == "➕ Request Service":
 
     st.markdown("""
     <div class="hero">
-        <div class="hero-label">REQUEST SERVICE</div>
+
+        <div class="hero-label">
+            REQUEST SERVICE
+        </div>
 
         <div class="hero-title">
-            How Can We<br>
-            <span class="orange">Help?</span>
+            Tell Us What You
+            <span class="orange">Need.</span>
         </div>
 
         <div class="hero-text">
-            Tell us what's going on. Your request will be reviewed
-            and the contractor can contact you directly.
+            Submit your project or service request.
+            No app download required.
         </div>
+
     </div>
     """, unsafe_allow_html=True)
 
-    with st.form("lead_form"):
+    with st.form(
+        "lead_form",
+        clear_on_submit=True
+    ):
 
-        st.subheader("Contact Information")
+        c1, c2 = st.columns(2)
 
-        col1, col2 = st.columns(2)
+        with c1:
 
-        with col1:
             name = st.text_input(
-                "Name *",
-                placeholder="Your name"
+                "Name *"
             )
 
             phone = st.text_input(
-                "Phone *",
-                placeholder="(956) 555-1234"
+                "Phone *"
             )
 
             email = st.text_input(
-                "Email",
-                placeholder="name@email.com"
+                "Email"
             )
-
-        with col2:
 
             zipcode = st.text_input(
-                "ZIP Code *",
-                placeholder="78520"
+                "ZIP Code *"
             )
+
+        with c2:
 
             service = st.selectbox(
                 "Service Needed",
@@ -445,10 +571,6 @@ elif mode == "➕ Request Service":
                 ]
             )
 
-        col3, col4 = st.columns(2)
-
-        with col3:
-
             budget = st.selectbox(
                 "Approximate Project Budget",
                 [
@@ -458,8 +580,6 @@ elif mode == "➕ Request Service":
                     "$5,000+"
                 ]
             )
-
-        with col4:
 
             source = st.selectbox(
                 "How Did You Find Us?",
@@ -478,10 +598,10 @@ elif mode == "➕ Request Service":
         description = st.text_area(
             "Describe the Problem or Project",
             placeholder=(
-                "Example: My electrical panel smells burnt "
+                "Example: Electrical panel smells burnt "
                 "and the breaker keeps tripping..."
             ),
-            height=130
+            height=140
         )
 
         submitted = st.form_submit_button(
@@ -489,222 +609,419 @@ elif mode == "➕ Request Service":
             use_container_width=True
         )
 
-        if submitted:
+    if submitted:
 
-            if not name or not phone or not zipcode:
+        if not name or not phone or not zipcode:
 
-                st.error(
-                    "Please enter your name, phone number and ZIP code."
-                )
+            st.error(
+                "Please enter your name, "
+                "phone number and ZIP code."
+            )
 
-            else:
+        elif not database_ready:
 
-                rating, score = score_lead(
-                    urgency,
-                    budget,
-                    service
-                )
+            st.error(
+                "Database is not connected."
+            )
 
-                lead = {
-                    "Date": central_time(),
-                    "Customer": name,
-                    "Phone": phone,
-                    "Email": email,
-                    "ZIP": zipcode,
-                    "Service": service,
-                    "Urgency": urgency,
-                    "Budget": budget,
-                    "Source": source,
-                    "Rating": rating,
-                    "Score": score,
-                    "Status": "New",
-                    "Description": description
-                }
+        else:
 
-                st.session_state.leads.append(lead)
+            rating, score = score_lead(
+                urgency,
+                budget,
+                service
+            )
+
+            now = central_now()
+
+            lead = {
+                "lead_id": str(uuid.uuid4()),
+                "created_at": now.isoformat(),
+                "display_date": display_time(),
+                "customer": name,
+                "phone": phone,
+                "email": email,
+                "zipcode": zipcode,
+                "service": service,
+                "urgency": urgency,
+                "budget": budget,
+                "source": source,
+                "rating": rating,
+                "score": score,
+                "status": "New",
+                "description": description
+            }
+
+            if save_lead(lead):
 
                 st.success(
                     "✅ SERVICE REQUEST RECEIVED"
                 )
 
-                st.write(
-                    "Your request has been sent to the contractor."
-                )
-
                 st.markdown(
-                    f"### Lead Priority: {rating}"
+                    f"### Lead Priority: "
+                    f"{rating} — {score}/100"
                 )
 
                 if urgency == "Emergency / ASAP":
 
                     st.warning(
-                        "⚠️ If you see fire, smoke, active sparking, "
-                        "or another immediate danger, move to a safe "
-                        "location and contact emergency services."
+                        "⚠️ If there is fire, smoke, "
+                        "active sparking or immediate danger, "
+                        "move to a safe location and contact "
+                        "emergency services."
                     )
 
+            else:
+
+                st.error(
+                    "The request could not be saved. "
+                    "Please try again."
+                )
+
 # =========================================================
-# LEAD PIPELINE
+# LEAD PIPELINE + FULL JOB DETAILS
 # =========================================================
 
-elif mode == "📋 Lead Pipeline":
+elif page == "📋 Lead Pipeline":
 
     st.title("📋 Lead Pipeline")
 
     st.write(
-        "Know which leads need your attention first."
+        "Select a customer to view the complete job request."
     )
-
-    leads = st.session_state.leads
 
     if not leads:
 
-        st.info("No leads in the pipeline yet.")
+        st.info(
+            "No leads have been saved yet."
+        )
 
     else:
 
-        df = pd.DataFrame(leads)
+        lead_options = {}
 
-        st.dataframe(
-            df[
-                [
-                    "Score",
-                    "Rating",
-                    "Customer",
-                    "Phone",
-                    "Service",
-                    "Urgency",
-                    "Budget",
-                    "Source",
-                    "Status",
-                    "Date"
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True
+        for lead in leads:
+
+            label = (
+                f"{lead.get('rating', '')}  "
+                f"{lead.get('customer', 'Unknown')} — "
+                f"{lead.get('service', '')}"
+            )
+
+            lead_options[label] = lead
+
+        selected_label = st.selectbox(
+            "SELECT LEAD",
+            list(lead_options.keys())
+        )
+
+        selected = lead_options[
+            selected_label
+        ]
+
+        st.divider()
+
+        st.markdown(
+            f"## {selected.get('rating', '')} "
+            f"{selected.get('customer', '')}"
+        )
+
+        st.markdown(
+            f"### Lead Score: "
+            f"{selected.get('score', 0)}/100"
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+
+            st.markdown(
+                '<div class="detail-label">'
+                'PHONE</div>',
+                unsafe_allow_html=True
+            )
+
+            st.markdown(
+                f"### {selected.get('phone', '—')}"
+            )
+
+            st.markdown(
+                '<div class="detail-label">'
+                'EMAIL</div>',
+                unsafe_allow_html=True
+            )
+
+            st.write(
+                selected.get("email") or "Not provided"
+            )
+
+        with c2:
+
+            st.markdown(
+                '<div class="detail-label">'
+                'SERVICE</div>',
+                unsafe_allow_html=True
+            )
+
+            st.write(
+                selected.get("service", "—")
+            )
+
+            st.markdown(
+                '<div class="detail-label">'
+                'URGENCY</div>',
+                unsafe_allow_html=True
+            )
+
+            st.write(
+                selected.get("urgency", "—")
+            )
+
+        with c3:
+
+            st.markdown(
+                '<div class="detail-label">'
+                'BUDGET</div>',
+                unsafe_allow_html=True
+            )
+
+            st.write(
+                selected.get("budget", "—")
+            )
+
+            st.markdown(
+                '<div class="detail-label">'
+                'ZIP CODE</div>',
+                unsafe_allow_html=True
+            )
+
+            st.write(
+                selected.get("zipcode", "—")
+            )
+
+        st.divider()
+
+        st.subheader(
+            "📝 Customer's Job Description"
+        )
+
+        description = selected.get(
+            "description",
+            ""
+        )
+
+        if description:
+
+            st.info(description)
+
+        else:
+
+            st.write(
+                "Customer did not provide a description."
+            )
+
+        st.subheader(
+            "📣 Lead Source"
+        )
+
+        st.write(
+            selected.get("source", "Unknown")
+        )
+
+        st.subheader(
+            "🕐 Request Received"
+        )
+
+        st.write(
+            selected.get(
+                "display_date",
+                ""
+            )
         )
 
         st.divider()
 
-        st.subheader("🔥 Priority Leads")
+        st.subheader(
+            "Lead Status"
+        )
 
-        hot = df[df["Rating"] == "🔥 HOT"]
+        status_options = [
+            "New",
+            "Contacted",
+            "Estimate Scheduled",
+            "Won",
+            "Lost"
+        ]
 
-        if hot.empty:
+        current_status = selected.get(
+            "status",
+            "New"
+        )
 
-            st.write("No HOT leads currently.")
-
-        else:
-
-            st.dataframe(
-                hot[
-                    [
-                        "Score",
-                        "Customer",
-                        "Phone",
-                        "Service",
-                        "Urgency",
-                        "Budget",
-                        "Description"
-                    ]
-                ],
-                use_container_width=True,
-                hide_index=True
+        try:
+            status_index = status_options.index(
+                current_status
             )
+
+        except ValueError:
+            status_index = 0
+
+        new_status = st.selectbox(
+            "UPDATE STATUS",
+            status_options,
+            index=status_index
+        )
+
+        if st.button(
+            "SAVE STATUS",
+            use_container_width=True
+        ):
+
+            if update_lead_status(
+                selected["lead_id"],
+                new_status
+            ):
+
+                st.success(
+                    f"Status updated to "
+                    f"{new_status}."
+                )
+
+                st.rerun()
+
+            else:
+
+                st.error(
+                    "Status could not be updated."
+                )
+
+        st.divider()
+
+        st.subheader(
+            "Contractor Actions"
+        )
+
+        phone = selected.get(
+            "phone",
+            ""
+        )
+
+        if phone:
+
+            clean_phone = (
+                phone
+                .replace("(", "")
+                .replace(")", "")
+                .replace("-", "")
+                .replace(" ", "")
+            )
+
+            st.markdown(
+                f"📞 **Call:** {phone}"
+            )
+
+            st.markdown(
+                f"💬 **Text:** {phone}"
+            )
+
+        st.caption(
+            "One-tap mobile Call/Text buttons "
+            "are coming with the mobile upgrade."
+        )
 
 # =========================================================
 # ANALYTICS
 # =========================================================
 
-elif mode == "📊 Analytics":
+elif page == "📊 Analytics":
 
-    st.title("📊 Lead Analytics")
-
-    leads = st.session_state.leads
+    st.title("📊 Analytics")
 
     if not leads:
 
         st.info(
-            "Analytics will appear as leads are captured."
+            "Analytics will appear after "
+            "permanent leads are captured."
         )
 
     else:
 
-        df = pd.DataFrame(leads)
+        rows = []
 
-        col1, col2 = st.columns(2)
+        for lead in leads:
 
-        with col1:
+            rows.append({
+                "Source": lead.get(
+                    "source",
+                    "Unknown"
+                ),
+                "Rating": lead.get(
+                    "rating",
+                    "Unknown"
+                ),
+                "Status": lead.get(
+                    "status",
+                    "Unknown"
+                )
+            })
 
-            st.subheader("Lead Sources")
+        df = pd.DataFrame(rows)
 
-            source_counts = (
-                df["Source"]
-                .value_counts()
-                .rename_axis("Source")
-                .reset_index(name="Leads")
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            st.subheader(
+                "Lead Sources"
             )
 
             st.bar_chart(
-                source_counts,
-                x="Source",
-                y="Leads"
+                df["Source"].value_counts()
             )
 
-        with col2:
+        with c2:
 
-            st.subheader("Lead Quality")
-
-            rating_counts = (
-                df["Rating"]
-                .value_counts()
-                .rename_axis("Rating")
-                .reset_index(name="Leads")
+            st.subheader(
+                "Lead Quality"
             )
 
             st.bar_chart(
-                rating_counts,
-                x="Rating",
-                y="Leads"
+                df["Rating"].value_counts()
             )
 
 # =========================================================
-# QR CODE PLACEHOLDER
+# QR
 # =========================================================
 
-elif mode == "🔳 QR Code":
+elif page == "🔳 QR Code":
 
     st.markdown("""
     <div class="hero">
-        <div class="hero-label">LEAD CAPTURE</div>
+
+        <div class="hero-label">
+            LEAD CAPTURE
+        </div>
 
         <div class="hero-title">
             Turn Anything Into A
-            <span class="orange">Lead Source.</span>
+            <span class="orange">
+            Lead Source.
+            </span>
         </div>
 
         <div class="hero-text">
-            Put your Lead Rescue AI QR code on business cards,
-            trucks, websites, invoices, yard signs and social media.
+            Put your Lead Rescue AI QR code on
+            business cards, trucks, websites,
+            invoices, yard signs and social media.
         </div>
+
     </div>
     """, unsafe_allow_html=True)
 
-    st.subheader("🔳 Your Customer QR Code")
-
     st.info(
-        "QR generation is coming in our next build. "
-        "It will open this contractor's Request Service page."
+        "🔳 QR generation is the next upgrade."
     )
-
-    st.write("Future tracking options:")
-
-    st.write("• Business Card")
-    st.write("• Truck / Vehicle")
-    st.write("• Facebook")
-    st.write("• Website")
-    st.write("• Yard Sign")
-    st.write("• Invoice / Receipt")
 
 # =========================================================
 # FOOTER
